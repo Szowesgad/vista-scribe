@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- unique label for the launch agent -->
+  <key>Label</key>
+  <string>com.whisperflow</string>
+
+  <!-- command to execute -->
+  <key>ProgramArguments</key>
+  <array>
+    <!-- path to the executable inside the .app bundle -->
+    <!-- adjust this path if the app name or location changes -->
+    <string>/Applications/WhisperFlow.app/Contents/MacOS/WhisperFlow</string>
+  </array>
+
+  <!-- run the program when the user logs in -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- keep the process running; restart if it crashes -->
+  <!-- consider adding this if needed, but might hide errors during dev -->
+  <!-- <key>KeepAlive</key> -->
+  <!-- <true/> -->
+
+  <!-- optional: throttle restarts to prevent loops -->
+  <!-- <key>ThrottleInterval</key> -->
+  <!-- <integer>10</integer> -->
+
+</dict>
+</plist> 
