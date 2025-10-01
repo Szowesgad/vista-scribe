@@ -9,7 +9,7 @@ OPTIONS = {
         # makes it a background app (no dock icon)
         "LSUIElement": True,
         # display name
-        "CFBundleName": "WhisperFlow",
+        "CFBundleName": "vista-scribe",
         # description shown when asking for mic permission
         "NSMicrophoneUsageDescription": "Needed to transcribe speech.",
         # add info about accessibility usage for clarity
@@ -29,5 +29,5 @@ setup(
     options={"py2app": OPTIONS},
     # dependency needed to run setup.py itself
     setup_requires=["py2app"],
-    name="WhisperFlow",  # name for the build process
+    name="vista-scribe",  # name for the build process
 )

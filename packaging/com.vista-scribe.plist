@@ -5,14 +5,14 @@
 <dict>
   <!-- unique label for the launch agent -->
   <key>Label</key>
-  <string>com.whisperflow</string>
+  <string>com.vista-scribe</string>
 
   <!-- command to execute -->
   <key>ProgramArguments</key>
   <array>
     <!-- path to the executable inside the .app bundle -->
     <!-- adjust this path if the app name or location changes -->
-    <string>/Applications/WhisperFlow.app/Contents/MacOS/WhisperFlow</string>
+    <string>/Applications/vista-scribe.app/Contents/MacOS/vista-scribe</string>
   </array>
 
   <!-- run the program when the user logs in -->

@@ -37,12 +37,21 @@ TOGGLE_VK = 44  # formerly quartz.kvk_ansi_slash
 # combines flags using bitwise or
 TOGGLE_FL = Quartz.kCGEventFlagMaskShift | Quartz.kCGEventFlagMaskCommand
 
+# Option/Alt modifier mask
+ALT_MASK = Quartz.kCGEventFlagMaskAlternate
+
+# Double-tap Option timing (seconds); can be overridden via env var DOUBLE_OPTION_INTERVAL_MS
+import os, time
+_DOUBLE_OPTION_INTERVAL = float(os.environ.get("DOUBLE_OPTION_INTERVAL_MS", "350")) / 1000.0
+
 # --- state ---
 
 # async queue to send detected hotkey events to the main application loop
 # maxsize=0 means unlimited size
 _queue = queue.Queue()
 _last_hold_state = None  # track the last state of the ctrl key (true=down, false=up)
+_last_alt_state = None   # track the last state of the option/alt key
+_last_alt_down_ts = 0.0  # timestamp of last alt down event
 
 # --- public api ---
 
@@ -141,21 +150,36 @@ def _tap(proxy, type_, event, refcon):
     print(f"[Tap Callback] Key: {keycode}, Flags: {flags}, Type: {event_type_str}")
     # --- end debug ---
 
-    # check for 'hold' key (ctrl) - primarily via flagschanged
+    # check for 'hold' key (ctrl) and Option double-tap via flags changes
     if type_ == Quartz.kCGEventFlagsChanged:
-        # determine current ctrl state directly from flags
+        # determine current ctrl and alt states directly from flags
         ctrl_is_down = (flags & Quartz.kCGEventFlagMaskControl) != 0
+        alt_is_down = (flags & ALT_MASK) != 0
 
-        # only queue an event if the state has *changed*
+        # Ctrl hold down/up events
         if ctrl_is_down != _last_hold_state:
             event_action = "down" if ctrl_is_down else "up"
             _queue.put(("hold", event_action))
             _last_hold_state = ctrl_is_down  # update the tracked state
-            print(
-                f"** Queued Hold Event: {event_action} (Ctrl state changed) **"
-            )  # debug confirmation
+            print(f"** Queued Hold Event: {event_action} (Ctrl state changed) **")
 
-    # check for 'toggle' key (shift+cmd+/) - only on key down
+        # Option double-tap detection: look for two down edges within interval
+        global _last_alt_state, _last_alt_down_ts
+        if alt_is_down != _last_alt_state:
+            # Edge detected
+            now = time.perf_counter()
+            if alt_is_down:
+                # This is a down edge; check time since previous down
+                if _last_alt_down_ts and (now - _last_alt_down_ts) <= _DOUBLE_OPTION_INTERVAL:
+                    # Double tap detected -> emit toggle press
+                    _queue.put(("toggle", "press"))
+                    print("** Queued Toggle Event: press (Double Option) **")
+                    _last_alt_down_ts = 0.0  # reset window
+                else:
+                    _last_alt_down_ts = now
+            _last_alt_state = alt_is_down
+
+    # check for classic 'toggle' key (shift+cmd+/) - only on key down
     elif type_ == Quartz.kCGEventKeyDown and keycode == TOGGLE_VK:
         # using `(flags & TOGGLE_FL) == TOGGLE_FL` checks if *at least* shift and command are pressed.
         if (flags & TOGGLE_FL) == TOGGLE_FL:

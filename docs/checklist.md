@@ -1,4 +1,4 @@
-# WhisperFlow-Py Development Checklist
+# vista-scribe-Py Development Checklist
 
 ## Usage Instructions
 
@@ -75,7 +75,7 @@
 ### Main Application
 
 - [x] Implement main.py
-  - [x] Create WhisperFlow class
+  - [x] Create vista-scribe class
   - [x] Implement state machine
   - [x] Add event handling
   - [x] Integrate all modules
@@ -115,13 +115,19 @@
 
 ### Documentation and Polish
 
-- [ ] Complete documentation
-  - [ ] Update README.md
-  - [ ] Add inline documentation
-  - [ ] Document setup process
+- [x] Complete documentation
+  - [x] Update README.md (local-first, backend, Quick Action, Tray icon, Ruff)
+  - [x] Add inline documentation where needed
+  - [x] Document setup process and one-click scripts
 - [ ] Final testing
   - [ ] Perform end-to-end testing
   - [ ] 👤 USER CHECKPOINT: Final review and sign-off
+
+### Quality & CI
+
+- [x] Add Ruff config (pyproject.toml)
+- [x] Add CI pipeline for Ruff (.github/workflows/lint.yml)
+- [ ] Consider adding unit-test workflow (pytest) on macOS
 
 ### Future Improvements
 

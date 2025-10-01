@@ -10,7 +10,26 @@
 __pycache__/
 *.pyc
 
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+.junie/
+assets/
+logs/
+
 # build artifacts
+packaging/dist/
+packaging/build/
 dist/
 build/
-*.egg-info/ 
+*.egg-info/
+
+# local data and outputs
+models/
+outputs/
+*.log
+
+# misc
+*.commands.txt
+packaging/.DS_Store

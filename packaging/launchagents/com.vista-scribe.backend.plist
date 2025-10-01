@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.vista-scribe.backend</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/env</string>
+      <string>bash</string>
+      <string>-lc</string>
+      <string>cd /users/maciejgad/hosted/vistas/vista-scribe && uv run python backend.py</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>WHISPER_DIR</key>
+      <string>/users/maciejgad/hosted/vistas/vista-scribe/models/whisper-large-v3-turbo</string>
+      <key>LLM_ID</key>
+      <string>/users/maciejgad/hosted/vistas/vista-scribe/models/bielik-4.5b-mxfp4-mlx</string>
+      <key>FORMAT_ENABLED</key>
+      <string>1</string>
+      <key>HOST</key>
+      <string>127.0.0.1</string>
+      <key>PORT</key>
+      <string>8237</string>
+      <key>LOG_LEVEL</key>
+      <string>INFO</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/vista-scribe.backend.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/vista-scribe.backend.err.log</string>
+  </dict>
+</plist>

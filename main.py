@@ -1,6 +1,6 @@
 # main.py
 #
-# purpose: entry point for the whisperflow application. initializes and runs the
+# purpose: entry point for the vista-scribe application. initializes and runs the
 #          macos menu bar app, manages the application's state machine, and
 #          coordinates interactions between hotkey detection, audio recording,
 #          transcription, formatting, and ui updates.
@@ -14,7 +14,7 @@
 #               ui.py (provides menu icon updates and paste function)
 #               logging (for application-level logging)
 #
-# key components: whisperflow class (subclass of rumps.app)
+# key components: vista-scribe class (subclass of rumps.app)
 #                 state machine logic (idle, rec_hold, rec_toggle, busy)
 #                 async worker task to process hotkey events
 #
@@ -234,23 +234,42 @@ async def handle_hotkey_event(app: rumps.App, key_type: str, action: str):
 # --- rumps application class ---
 
 
-class WhisperFlow(rumps.App):
-    """macos menu bar application class using rumps.
+class VistaScribe(rumps.App):
+    """macOS menu bar application class using rumps.
 
-    integrates hotkey listening, state management, and ui updates.
-    runs asyncio operations in a separate thread.
+    Integrates hotkey listening, state management, and UI updates.
+    Runs asyncio operations in a separate thread.
     """
 
     def __init__(self):
-        """initializes the rumps app, queue timer, and asyncio thread setup."""
+        """Initializes the rumps app, queue timer, and asyncio thread setup."""
         super().__init__(MenuIcon.idle, quit_button=None)
+
+        # Try to set a tray icon image (keeps state glyphs out of the title area)
+        try:
+            from path_utils import normalize_model_path  # lazy import to avoid cycles
+
+            icon_env = os.environ.get("TRAY_ICON")
+            default_icon = "/Users/maciejgad/hosted/Vistas/vista-develop/src-tauri/icons/icon.png"
+            candidate = icon_env or default_icon
+            if candidate:
+                # Normalize '/Users' → '/users' on macOS when that path exists
+                norm = normalize_model_path(candidate) or candidate
+                if os.path.isfile(norm):
+                    self.icon = norm
+                    # Hide title text when an icon is present
+                    self.title = ""
+                    logger.info(f"Tray icon set: {norm}")
+        except Exception as e:
+            logger.warning(f"Tray icon setup skipped: {e}")
+
         self.menu = ["Quit"]
         self.menu["Quit"].set_callback(self._quit_app)
         self.event_queue = hk_events()  # get the standard queue
         self.async_loop = None
         self.async_thread = None
         self.queue_timer = rumps.Timer(self.poll_queue, 0.05)  # poll queue every 50ms
-        logger.info("WhisperFlow App initialized.")
+        logger.info("Vista Scribe App initialized.")
 
     def poll_queue(self, _timer):
         """periodically called by rumps.timer to check the event queue.
@@ -348,7 +367,7 @@ class WhisperFlow(rumps.App):
 
 if __name__ == "__main__":
     logger.info("Application starting...")
-    app = WhisperFlow()
+    app = VistaScribe()
     # run_loop() handles starting the hotkey listener, worker, and rumps loop
     app.run_loop()
     logger.info("Application finished.")

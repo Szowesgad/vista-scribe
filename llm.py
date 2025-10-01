@@ -1,131 +1,167 @@
-# llm.py (large language model)
+# llm.py (formatting)
 #
-# purpose: provides a function to send raw transcribed text to an openai gpt
-#          model (specifically gpt-4o-mini) for punctuation, capitalization,
-#          and general formatting cleanup.
+# Local formatting using MLX-LM by default (no API key). Optional OpenAI fallback.
 #
-# dependencies: openai (official python client library)
-#               asyncio (for running blocking api calls in executor)
-#               os (to retrieve api key from environment variables)
-#               functools (for functools.partial)
-#               logging (for status/error messages)
+# Env vars:
+# - FORMAT_BACKEND: 'local' (default) or 'openai'.
+# - LLM_ID: path to local MLX model dir or HF repo id (default tries local Bielik paths).
+# - TEMPERATURE, MAX_NEW_TOKENS: generation params for local backend.
 #
-# key components: format_text function (async function takes raw text, returns formatted text)
-#                 system constant (defines the system prompt for the llm)
-#
-# design rationale: utilizes the chat completions api for formatting. gpt-4o-mini
-#                   is chosen for its balance of speed, cost, and capability for this
-#                   task. a system prompt guides the model to perform the desired
-#                   cleanup and return only the result. similar to stt.py, the api
-#                   call uses run_in_executor for non-blocking async operation.
-#                   re-uses the openai client initialized in stt.py for efficiency.
-#
-import openai
+from __future__ import annotations
 import asyncio
 import functools
 import logging
-import os  # needed if client initialization is moved here
+import os
 from dotenv import load_dotenv
 
+# Local MLX-LM
+from mlx_lm import load as load_lm, generate as lm_generate
+from mlx_lm.generate import make_sampler
+from path_utils import normalize_model_path
+
+# Optional OpenAI fallback
+try:
+    import openai  # type: ignore
+except Exception:  # pragma: no cover
+    openai = None  # not required in local mode
+
 # --- setup ---
-
-# load environment variables (if not already loaded by another module)
 load_dotenv()
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+                    format="%(asctime)s - %(levelname)s - %(message)s")
 
-# configure logging (ensure it's configured, might be redundant if main sets it up)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+FORMAT_BACKEND = os.environ.get("FORMAT_BACKEND", "local").lower()
+FORMAT_ENABLED = os.environ.get("FORMAT_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 
-# reuse the client initialized in stt.py or initialize if run standalone
-# note: in a real app, client initialization is better handled centrally.
-# if 'client' not in globals() or client is None:
-#     try:
-#         client = openai.OpenAI()
-#         logging.info("OpenAI client initialized in llm.py.")
-#     except openai.OpenAIError as e:
-#         logging.error(f"Failed to initialize OpenAI client in llm.py: {e}.")
-#         client = None
-# else:
-#     logging.info("Reusing OpenAI client from another module (presumably stt.py)")
-# simplified approach for now, assuming client exists from stt import:
-from stt import client  # attempt to import the initialized client
+# --- model load (local) ---
+_model = None
+_tok = None
+_llm_id = None
+
+
+def _choose_default_llm_path() -> str:
+    """Pick a sensible default model path present in this repo."""
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(repo_root, "models", "bielik-1.5b-mxfp4-mlx"),
+        os.path.join(repo_root, "bielik-1.5b-mxfp4-mlx"),  # if stored at root
+        os.path.join(repo_root, "models", "bielik-4.5b-mxfp4-mlx"),
+        os.path.join(repo_root, "bielik-4.5b-mxfp4-mlx"),
+    ]
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+    # Fallback to a known HF MLX repo (download-on-first-use)
+    return "mlx-community/Llama-3.2-3B-Instruct-4bit"
+
+
+def _init_local_model():
+    global _model, _tok, _llm_id
+    if _model is not None:
+        return
+    raw_llm_id = os.environ.get("LLM_ID", _choose_default_llm_path())
+    llm_id = normalize_model_path(raw_llm_id)
+    _model, _tok = load_lm(llm_id)
+    _llm_id = llm_id
+    logging.info(f"MLX-LM model loaded: {llm_id}")
+
+
+def _build_prompt(user_text: str) -> str:
+    """Build a prompt using the tokenizer's chat template when available."""
+    try:
+        if hasattr(_tok, "apply_chat_template"):
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_text},
+            ]
+            return _tok.apply_chat_template(messages, add_generation_prompt=True)
+    except Exception as e:  # fallback
+        logging.debug(f"apply_chat_template failed, falling back: {e}")
+    # Fallback minimal instruction-style prompt
+    return f"System: {SYSTEM_PROMPT}\nUser: {user_text}\nAssistant:"
+
 
 # --- constants ---
-
-# system prompt defining the llm's task
-SYSTEM_PROMPT = "You are a helpful assistant that corrects grammar, punctuation, and capitalization in text. Respond with only the corrected text, nothing else. Do not add any introductory phrases like 'Here is the corrected text:'."
-# model to use for formatting
-FORMATTING_MODEL = "gpt-4o-mini"
-# controls randomness, lower values make output more deterministic
-TEMPERATURE = 0.2
-
-# --- public functions ---
+SYSTEM_PROMPT = (
+    "Sformatuj polski transkrypt: dodaj interpunkcję, popraw wielkie litery, "
+    "nie zmieniaj sensu ani słów, nie dodawaj komentarza."
+)
+TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.2"))
+TOP_P = float(os.environ.get("TOP_P", "0.0"))
+TOP_K = int(os.environ.get("TOP_K", "0"))
+MAX_NEW_TOKENS = int(os.environ.get("MAX_NEW_TOKENS", "128"))
+OPENAI_MODEL = os.environ.get("OPENAI_FORMAT_MODEL", "gpt-4o-mini")
 
 
 async def format_text(raw_text: str) -> str | None:
-    """formats the raw text using an openai llm (gpt-4o-mini).
+    """Format raw text using the configured backend.
 
-    sends the raw text along with a system prompt to the specified model
-    and returns the cleaned-up text content from the response.
-    runs the blocking api call in a separate thread using run_in_executor.
-
-    args:
-        raw_text (str): the raw text transcript to format.
-
-    returns:
-        str | none: the formatted text, stripped of leading/trailing whitespace,
-                    or none if formatting fails or the client isn't initialized.
+    Returns cleaned text or the original on empty input.
     """
-    if not client:
-        logging.error("OpenAI client not initialized. Cannot format text.")
-        return None
+    # Allow disabling formatting entirely (LLM optional)
+    if not FORMAT_ENABLED:
+        return raw_text
+
     if not raw_text or raw_text.isspace():
         logging.warning("Received empty or whitespace-only text for formatting.")
-        return raw_text  # return original if nothing to format
+        return raw_text
 
-    logging.info(
-        f"Starting text formatting for input: '{raw_text[:50]}...' ({len(raw_text)} chars)"
-    )
-    loop = asyncio.get_event_loop()
+    if FORMAT_BACKEND == "openai":
+        if openai is None:
+            logging.error("OpenAI backend requested but openai package not available.")
+            return raw_text
+        try:
+            client = openai.OpenAI()
+        except Exception as e:
+            logging.error(f"Failed to init OpenAI client: {e}")
+            return raw_text
 
-    # construct messages for the chat completions api
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": raw_text},
-    ]
-
-    try:
-        # prepare the function call for the executor
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": raw_text},
+        ]
+        loop = asyncio.get_event_loop()
         func = functools.partial(
             client.chat.completions.create,
-            model=FORMATTING_MODEL,
+            model=OPENAI_MODEL,
             messages=messages,
             temperature=TEMPERATURE,
         )
-
-        # run the blocking api call in the executor
-        logging.info(f"Sending text to OpenAI {FORMATTING_MODEL} API...")
-        response = await loop.run_in_executor(None, func)
-        logging.info("Received formatting response from API.")
-
-        # extract the formatted text content
-        if response.choices:
-            formatted_text = response.choices[0].message.content.strip()
-            logging.info(
-                f"Formatting successful. Output: '{formatted_text[:50]}...' ({len(formatted_text)} chars)"
-            )
-            # print(f"Formatted text: {formatted_text}") # debug
-            return formatted_text
-        else:
-            logging.warning("OpenAI response contained no choices.")
+        try:
+            logging.info(f"Sending text to OpenAI {OPENAI_MODEL} API…")
+            response = await loop.run_in_executor(None, func)
+            if response.choices:
+                return (response.choices[0].message.content or "").strip()
+            return None
+        except Exception as e:
+            logging.error(f"OpenAI formatting error: {e}")
             return None
 
-    except openai.APIError as e:
-        logging.error(f"OpenAI API error during text formatting: {e}")
-        return None
-    except Exception as e:
-        logging.error(
-            f"An unexpected error occurred during text formatting: {e}", exc_info=True
+    # Local backend (default)
+    try:
+        _init_local_model()
+        prompt = _build_prompt(raw_text)
+        loop = asyncio.get_event_loop()
+        sampler = make_sampler(temp=TEMPERATURE, top_p=TOP_P, top_k=TOP_K)
+        func = functools.partial(
+            lm_generate,
+            _model,
+            _tok,
+            prompt,
+            max_tokens=MAX_NEW_TOKENS,
+            sampler=sampler,
         )
+        out = await loop.run_in_executor(None, func)
+        out = (out or "").strip()
+        if out:
+            return out
+        # Fallback to CLI if model produced empty output
+        import subprocess, sys
+        cmd = [sys.executable, '-m', 'mlx_lm.generate', '--model', _llm_id or 'models/bielik-1.5b-mxfp4-mlx', '--system-prompt', SYSTEM_PROMPT, '--prompt', '-', '--max-tokens', str(MAX_NEW_TOKENS), '--temp', str(TEMPERATURE)]
+        logging.info("Falling back to CLI: python -m mlx_lm.generate …")
+        proc = await loop.run_in_executor(None, lambda: subprocess.run(cmd, input=raw_text.encode('utf-8'), capture_output=True))
+        txt = proc.stdout.decode('utf-8').strip()
+        return txt or None
+    except Exception as e:
+        logging.error(f"Local formatting error: {e}", exc_info=True)
         return None

@@ -1,119 +1,108 @@
 # stt.py (speech-to-text)
 #
-# purpose: provides a function to send an audio file to the openai whisper api
-#          for transcription and returns the resulting text.
+# Local transcription using MLX Whisper (no API key required).
+# Loads the Whisper model once and transcribes audio files produced by audio.py.
 #
-# dependencies: openai (official python client library)
-#               asyncio (for running blocking api calls in executor)
-#               os (to retrieve api key from environment variables)
-#               functools (for functools.partial)
-#               logging (for status/error messages)
-#
-# key components: transcribe function (async function takes audio path, returns text)
-#
-# design rationale: uses the official openai library for interacting with the
-#                   whisper api. the api call is potentially blocking, so it's
-#                   wrapped with loop.run_in_executor to avoid blocking the main
-#                   async event loop. api key is securely fetched from environment
-#                   variables using dotenv for flexibility during development.
-#
-import openai
+# Key env vars:
+# - WHISPER_DIR: absolute or relative path to whisper model directory.
+#                If omitted, defaults to './models/whisper-large-v3-turbo' if present,
+#                otherwise './whisper-large-v3-turbo' in repo root.
+#                NOTE: mlx_whisper may be sensitive to uppercase in absolute
+#                paths on macOS; we normalize '/Users' → '/users'.
+
 import asyncio
 import os
-import functools
 import logging
 from dotenv import load_dotenv
 
+# MLX Whisper
+import mlx_whisper as whisper
+from mlx_whisper.load_models import load_model
+import wave
+import numpy as np
+
+from path_utils import normalize_model_path
+
 # --- setup ---
-
-# load environment variables from .env file (especially for api key)
 load_dotenv()
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+                    format="%(asctime)s - %(levelname)s - %(message)s")
 
-# configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+# --- model load (once) ---
+_repo_root = os.path.dirname(os.path.abspath(__file__))
+# Allow choosing between large-v3-turbo and medium via env; fallback to what's present
+_variant = os.environ.get("WHISPER_VARIANT", "").strip().lower()  # 'large-v3-turbo' | 'medium'
 
-# initialize openai client
-# reads OPENAI_API_KEY automatically from environment variables
+# If WHISPER_DIR provided, use it directly (normalized) below; otherwise compute default
+if not os.environ.get("WHISPER_DIR"):
+    candidates = []
+    if _variant in {"large-v3-turbo", "medium"}:
+        candidates.append(os.path.join(_repo_root, "models", f"whisper-{_variant}"))
+        candidates.append(os.path.join(_repo_root, f"whisper-{_variant}"))
+    else:
+        # No explicit variant: prefer large-v3-turbo if present, else medium
+        for v in ("large-v3-turbo", "medium"):
+            candidates.append(os.path.join(_repo_root, "models", f"whisper-{v}"))
+            candidates.append(os.path.join(_repo_root, f"whisper-{v}"))
+    # pick first existing, else default to models/whisper-large-v3-turbo path
+    _default_whisper_path = next((c for c in candidates if os.path.isdir(c)), os.path.join(_repo_root, "models", "whisper-large-v3-turbo"))
+else:
+    _default_whisper_path = os.environ.get("WHISPER_DIR")
+
+WHISPER_DIR = normalize_model_path(_default_whisper_path)
+
 try:
-    client = openai.OpenAI()
-    logging.info("OpenAI client initialized successfully.")
-except openai.OpenAIError as e:
-    logging.error(
-        f"Failed to initialize OpenAI client: {e}. Make sure OPENAI_API_KEY is set."
-    )
-    client = None  # set client to none to prevent further errors
-
-# --- public functions ---
+    whisper_model = load_model(WHISPER_DIR)
+    logging.info(f"MLX Whisper model loaded from: {WHISPER_DIR}")
+except Exception as e:
+    logging.error(f"Failed to load MLX Whisper model at '{WHISPER_DIR}': {e}")
+    whisper_model = None
 
 
 async def transcribe(path: str) -> str | None:
-    """transcribes the audio file at the given path using openai whisper.
+    """Transcribe the audio file at the given path using local MLX Whisper.
 
-    opens the audio file, sends it to the whisper-1 model via the
-    openai api, and returns the transcribed text.
-    runs the blocking api call in a separate thread using run_in_executor.
-
-    args:
-        path (str): the file path to the audio file (expecting .wav).
-
-    returns:
-        str | none: the transcribed text, stripped of leading/trailing whitespace,
-                    or none if transcription fails or the client isn't initialized.
+    Args:
+        path: Path to the audio file (wav/mp3/flac/aiff). audio.py saves .wav.
+    Returns:
+        The transcribed text or None on failure.
     """
-    if not client:
-        logging.error("OpenAI client not initialized. Cannot transcribe.")
+    if whisper_model is None:
+        logging.error("Whisper model not initialized. Set WHISPER_DIR correctly.")
         return None
     if not os.path.exists(path):
         logging.error(f"Audio file not found at path: {path}")
         return None
 
     logging.info(f"Starting transcription for audio file: {path}")
-    loop = asyncio.get_event_loop()
-
     try:
-        # open the file in binary read mode
-        with open(path, "rb") as audio_file:
-            # prepare the function call with arguments for the executor
-            # use functools.partial to pass the file handle and other args
-            func = functools.partial(
-                client.audio.transcriptions.create, model="whisper-1", file=audio_file
-            )
+        # Load WAV (audio.py saves 16kHz mono int16). For other formats, rely on CLI for now.
+        with wave.open(path, 'rb') as wf:
+            sr = wf.getframerate()
+            ch = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            n = wf.getnframes()
+            raw = wf.readframes(n)
+        if sampwidth == 2:
+            arr = np.frombuffer(raw, dtype=np.int16)
+            scale = 32768.0
+        elif sampwidth == 4:
+            arr = np.frombuffer(raw, dtype=np.int32)
+            scale = 2147483648.0
+        else:
+            arr = np.frombuffer(raw, dtype=np.uint8).astype(np.int16)
+            scale = 128.0
+        if ch > 1:
+            arr = arr.reshape(-1, ch).mean(axis=1)
+        samples = (arr.astype(np.float32) / scale).astype(np.float32)
 
-            # run the blocking openai api call in the default executor (thread pool)
-            logging.info("Sending audio to OpenAI Whisper API...")
-            response = await loop.run_in_executor(None, func)
-            logging.info("Received transcription response from API.")
-
-        # extract and clean the text
-        transcript = response.text.strip()
-        logging.info(f"Transcription successful. Length: {len(transcript)} chars.")
-        # print(f"Raw transcript: {transcript}") # debug
-        return transcript
-
-    except FileNotFoundError:
-        logging.error(
-            f"Error opening audio file (already checked exists, race condition?): {path}"
-        )
-        return None
-    except openai.APIError as e:
-        logging.error(f"OpenAI API error during transcription: {e}")
-        return None
+        # Run in thread pool to avoid blocking if heavy
+        loop = asyncio.get_event_loop()
+        func = lambda: whisper.transcribe(whisper_model, samples, sr)
+        result = await loop.run_in_executor(None, func)
+        text = (result.get("text") or "").strip()
+        logging.info(f"Transcription successful. Length: {len(text)} chars.")
+        return text
     except Exception as e:
-        logging.error(
-            f"An unexpected error occurred during transcription: {e}", exc_info=True
-        )
+        logging.error(f"Error during local transcription: {e}", exc_info=True)
         return None
-    finally:
-        # attempt to clean up the temporary audio file after transcription
-        try:
-            # be cautious about deleting files not created by this specific function
-            # only delete if it's confirmed to be a temporary file we should manage
-            # for now, assume the caller (e.g., audio.py) manages its temp file
-            # if os.path.exists(path) and "tmp" in path: # simple check for temp path
-            #     os.remove(path)
-            #     logging.info(f"Cleaned up temporary audio file: {path}")
-            pass  # let caller handle cleanup
-        except OSError as ose:
-            logging.warning(f"Could not clean up audio file {path}: {ose}")

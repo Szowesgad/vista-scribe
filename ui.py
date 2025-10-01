@@ -56,12 +56,19 @@ class MenuIcon:
     def set(app, glyph: str):
         """sets the menu bar icon to the specified glyph.
 
+        if an image icon is present (app.icon), keep the title empty to avoid
+        overlaying text next to the tray image.
+
         args:
             app (rumps.app): the main application instance.
             glyph (str): the unicode character to use as the icon.
         """
         if app:
-            app.title = glyph
+            if getattr(app, "icon", None):
+                # When an image icon is used, keep title empty
+                app.title = ""
+            else:
+                app.title = glyph
             # logging.debug(f"Menu icon set to: {glyph}")
         else:
             logging.warning("Attempted to set menu icon, but app object was None.")
