@@ -1,0 +1,15 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Vista Scribe — Backend (uv)" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="uv run python backend.py" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+    <envs>
+      <env name="HOST" value="127.0.0.1" />
+      <env name="PORT" value="8237" />
+      <env name="LOG_LEVEL" value="INFO" />
+      <env name="FORMAT_ENABLED" value="1" />
+      <env name="WHISPER_VARIANT" value="large-v3-turbo" />
+    </envs>
+    <method v="2" />
+  </configuration>
+</component>

@@ -91,6 +91,12 @@ except Exception as e:
 # LLM (optional)
 FORMAT_ENABLED = os.environ.get("FORMAT_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 LLM_ID_RAW = os.environ.get("LLM_ID")
+# Auto-detect default local LLM if not provided and formatting is enabled
+if FORMAT_ENABLED and not LLM_ID_RAW:
+    _default_llm = os.path.join(REPO_ROOT, "models", "bielik-4.5b-mxfp4-mlx")
+    if os.path.isdir(_default_llm):
+        LLM_ID_RAW = _default_llm
+
 _model = None
 _tok = None
 _llm_id = None

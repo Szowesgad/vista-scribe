@@ -43,7 +43,8 @@ mkdir -p "$LOG_DIR"
 WHISPER_VARIANT="${WHISPER_VARIANT:-large-v3-turbo}"
 LLM_REPO_OR_PATH="${LLM_ID:-}"
 FORMAT_ENABLED="${FORMAT_ENABLED:-1}"
-HOST="${HOST:-127.0.0.1}"
+# Avoid zsh $HOST special param collision: use BIND_HOST internally; allow override via VS_HOST or --host
+BIND_HOST="${VS_HOST:-127.0.0.1}"
 PORT="${PORT:-8237}"
 DO_INSTALL=0
 RUN_FOREGROUND=1
@@ -63,7 +64,7 @@ while [[ $# -gt 0 ]]; do
     --foreground)
       DO_INSTALL=0; RUN_FOREGROUND=1; shift;;
     --host)
-      HOST="$2"; shift 2;;
+      BIND_HOST="$2"; shift 2;;
     --port)
       PORT="$2"; shift 2;;
     --no-test)
@@ -123,19 +124,33 @@ else
 fi
 WHISPER_DIR="$(lower_users "$WHISPER_DIR")"
 
-# LLM optional
+# LLM optional (auto-detect if enabled and not provided)
 if [[ -n "$LLM_REPO_OR_PATH" ]]; then
   LLM_ID="$(lower_users "$LLM_REPO_OR_PATH")"
 else
-  LLM_ID=""
+  if [[ "$FORMAT_ENABLED" != "0" && "$FORMAT_ENABLED" != "false" && "$FORMAT_ENABLED" != "no" ]]; then
+    # Try to find a local MLX-LM model directory under models (ignore whisper-*)
+    LLM_ID=""
+    for d in "$MODEL_DIR"/*; do
+      if [[ -d "$d" && "$(basename "$d")" != whisper-* ]]; then
+        if [[ -f "$d/tokenizer.json" || -f "$d/config.json" ]]; then
+          LLM_ID="$d"
+          break
+        fi
+      fi
+    done
+  else
+    LLM_ID=""
+  fi
 fi
+LLM_ID="$(lower_users "${LLM_ID:-}")"
 
 # 4) Start backend
 if [[ $DO_INSTALL -eq 1 ]]; then
   echo "[i] Installing backend LaunchAgent…"
   WHISPER_DIR="$WHISPER_DIR" \
   FORMAT_ENABLED="$FORMAT_ENABLED" \
-  HOST="$HOST" PORT="$PORT" \
+  HOST="$BIND_HOST" PORT="$PORT" \
   LLM_ID="$LLM_ID" \
   sh "$REPO_DIR/packaging/scripts/install_backend.command"
 else
@@ -145,7 +160,7 @@ else
   : > "$LOG_DIR/backend.err.log"
   # Start
   ( \
-    export WHISPER_DIR="$WHISPER_DIR" FORMAT_ENABLED="$FORMAT_ENABLED" HOST="$HOST" PORT="$PORT"; \
+    export WHISPER_DIR="$WHISPER_DIR" FORMAT_ENABLED="$FORMAT_ENABLED" HOST="$BIND_HOST" PORT="$PORT"; \
     if [[ -n "$LLM_ID" ]]; then export LLM_ID="$LLM_ID"; fi; \
     nohup uv run python backend.py >>"$LOG_DIR/backend.out.log" 2>>"$LOG_DIR/backend.err.log" & \
   )
@@ -153,18 +168,18 @@ else
 fi
 
 # Healthcheck (wait up to ~60s)
-echo "[i] Healthchecking backend at http://$HOST:$PORT/healthz …"
+echo "[i] Healthchecking backend at http://$BIND_HOST:$PORT/healthz …"
 ATTEMPTS=120
 ok=0
 for i in $(seq 1 $ATTEMPTS); do
-  if curl -s "http://$HOST:$PORT/healthz" | grep -q '"ok": true'; then
+  if curl -s "http://$BIND_HOST:$PORT/healthz" | grep -q '"ok": true'; then
     ok=1; break
   fi
   sleep 0.5
 done
 if [[ $ok -ne 1 ]]; then
   echo "[!] Backend healthcheck failed. See logs in $LOG_DIR/backend.err.log"
-  echo "[i] Tip: model loading can take longer on first run. Recheck: curl -s http://$HOST:$PORT/healthz"
+  echo "[i] Tip: model loading can take longer on first run. Recheck: curl -s http://$BIND_HOST:$PORT/healthz"
   exit 1
 fi
 
@@ -186,8 +201,8 @@ if [[ $RUN_TESTS -eq 1 ]]; then
 fi
 
 echo "\n=== Done ==="
-echo "Backend:   http://$HOST:$PORT  (health: /healthz)"
+echo "Backend:   http://$BIND_HOST:$PORT  (health: /healthz)"
 echo "Whisper:   $WHISPER_DIR"
 echo "LLM_ID:    ${LLM_ID:-<disabled>}  (FORMAT_ENABLED=$FORMAT_ENABLED)"
 echo "Logs:      $LOG_DIR/backend.{out,err}.log"
-echo "Examples:  curl -s http://$HOST:$PORT/healthz | jq"
+echo "Examples:  curl -s http://$BIND_HOST:$PORT/healthz | jq"

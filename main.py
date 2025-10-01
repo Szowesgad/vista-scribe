@@ -28,12 +28,13 @@ import asyncio
 import rumps
 import logging
 import os
+import sys
 import objc  # for selector
 import threading  # for asyncio thread
 import queue  # for checking standard queue
 
 # import our modules
-from hotkeys import start as hotkeys_start, events as hk_events
+from hotkeys import start as hotkeys_start, stop as hotkeys_stop, is_active as hotkeys_active, events as hk_events
 from audio import Recorder
 from stt import transcribe
 from llm import format_text
@@ -250,7 +251,8 @@ class VistaScribe(rumps.App):
             from path_utils import normalize_model_path  # lazy import to avoid cycles
 
             icon_env = os.environ.get("TRAY_ICON")
-            default_icon = "/Users/maciejgad/hosted/Vistas/vista-develop/src-tauri/icons/icon.png"
+            repo_root = os.path.dirname(os.path.abspath(__file__))
+            default_icon = os.path.join(repo_root, "assets", "icon.png")
             candidate = icon_env or default_icon
             if candidate:
                 # Normalize '/Users' → '/users' on macOS when that path exists
@@ -262,9 +264,27 @@ class VistaScribe(rumps.App):
                     logger.info(f"Tray icon set: {norm}")
         except Exception as e:
             logger.warning(f"Tray icon setup skipped: {e}")
-
-        self.menu = ["Quit"]
+        
+        # Initialize menu with app status and controls
+        self.hotkeys_enabled = True  # Default state, will be updated in run_loop
+        
+        self.menu = [
+            "Status: Initializing...",
+            None,  # Separator
+            "Enable Hotkeys",
+            "Open System Accessibility Settings...",
+            None,  # Separator
+            "Quit"
+        ]
+        
+        # Set callbacks
+        self.menu["Enable Hotkeys"].set_callback(self._toggle_hotkeys)
+        self.menu["Open System Accessibility Settings..."].set_callback(self._open_accessibility)
         self.menu["Quit"].set_callback(self._quit_app)
+        
+        # Disable menu items initially until we know hotkeys status
+        self.menu["Enable Hotkeys"].state = False
+        
         self.event_queue = hk_events()  # get the standard queue
         self.async_loop = None
         self.async_thread = None
@@ -310,20 +330,33 @@ class VistaScribe(rumps.App):
         logger.info("Asyncio event loop closed.")
 
     def _quit_app(self, _sender):
-        """cleanly quits the application.
-        stops the timer, signals the asyncio loop to stop, joins the thread.
+        """Cleanly quits the application.
+        
+        Stops hotkeys, cleans up event taps, stops the timer, 
+        signals the asyncio loop to stop, joins the thread.
         """
         logger.info("Quit menu item selected. Shutting down.")
-        self.queue_timer.stop()  # stop polling
+        
+        # First, safely stop any active hotkey event taps
+        logger.info("Cleaning up hotkey event taps...")
+        try:
+            hotkeys_stop()
+            logger.info("Hotkey event taps disabled successfully")
+        except Exception as e:
+            logger.error(f"Error disabling hotkey event taps: {e}")
+        
+        # Stop the queue polling timer
+        self.queue_timer.stop()
         logger.info("Queue timer stopped.")
 
+        # Clean up the asyncio thread
         if self.async_loop and self.async_loop.is_running():
             logger.info("Requesting asyncio loop to stop...")
             self.async_loop.call_soon_threadsafe(self.async_loop.stop)
-            # wait for the thread to finish
+            # Wait for the thread to finish
             if self.async_thread:
                 logger.info("Waiting for asyncio thread to join...")
-                self.async_thread.join(timeout=2.0)  # wait max 2 seconds
+                self.async_thread.join(timeout=2.0)  # Wait max 2 seconds
                 if self.async_thread.is_alive():
                     logger.warning("Asyncio thread did not join cleanly.")
                 else:
@@ -332,32 +365,185 @@ class VistaScribe(rumps.App):
         logger.info("Quitting rumps application.")
         rumps.quit_application()
 
+    def _toggle_hotkeys(self, sender):
+        """Toggle hotkeys on/off based on current state.
+        
+        When toggled off, stops the event tap. When toggled on, 
+        attempts to restart the hotkey listeners.
+        """
+        if self.hotkeys_enabled:
+            # Disable hotkeys
+            logger.info("Disabling hotkeys by user request")
+            hotkeys_stop()
+            self.hotkeys_enabled = False
+            self.menu["Enable Hotkeys"].state = False
+            self.menu["Status: Hotkeys Enabled"].title = "Status: Hotkeys Disabled"
+            # Update icon to show disabled state
+            MenuIcon.set(self, "🚫")
+        else:
+            # Enable hotkeys
+            logger.info("Enabling hotkeys by user request")
+            if hotkeys_start():
+                self.hotkeys_enabled = True
+                self.menu["Enable Hotkeys"].state = True
+                self.menu["Status: Hotkeys Disabled"].title = "Status: Hotkeys Enabled"
+                # Reset icon to idle state
+                MenuIcon.set(self, MenuIcon.idle)
+            else:
+                # Failed to enable
+                logger.error("Failed to enable hotkeys. Check accessibility permissions.")
+                # Show error in menu
+                self.menu["Status: Hotkeys Disabled"].title = "Status: Failed to Enable Hotkeys"
+                # Show error dialog
+                rumps.alert(
+                    title="Hotkey Initialization Failed",
+                    message="Could not enable hotkeys. Please check Accessibility permissions in System Settings.",
+                    ok="OK"
+                )
+    
+    def _open_accessibility(self, sender):
+        """Open macOS System Settings to the Accessibility pane.
+        
+        This helps users grant the necessary permissions for hotkeys to work.
+        """
+        try:
+            # Use AppleScript to open the Privacy & Security settings
+            import subprocess
+            script = """
+            tell application "System Settings"
+                activate
+                reveal anchor "Privacy_Accessibility" of pane id "com.apple.settings.PrivacySecurity.extension"
+            end tell
+            """
+            subprocess.run(["osascript", "-e", script])
+            logger.info("Opened System Settings to Accessibility pane")
+        except Exception as e:
+            logger.error(f"Failed to open Accessibility settings: {e}")
+            rumps.alert(
+                title="Could Not Open Settings",
+                message="Please open System Settings → Privacy & Security → Accessibility manually and enable this app.",
+                ok="OK"
+            )
+
     @objc.IBAction
     def reset_(self, sender):
-        """resets the icon to the 'idle' state.
+        """Resets the icon to the 'idle' state.
 
-        called by the nstimer scheduled in ui.menuicon.success().
-        needs to be an instance method accessible via objective-c.
+        Called by the NSTimer scheduled in ui.menuicon.success().
+        Needs to be an instance method accessible via Objective-C.
 
-        args:
-            sender: the nstimer object (unused, but required by selector).
+        Args:
+            sender: The NSTimer object (unused, but required by selector).
         """
         logger.debug("NSTimer fired: Resetting icon to idle.")
-        MenuIcon.set(self, MenuIcon.idle)
-        logger.info("UI State: Idle (🜏)")
+        # Only reset to idle if hotkeys are enabled
+        if self.hotkeys_enabled:
+            MenuIcon.set(self, MenuIcon.idle)
+            logger.info("UI State: Idle (🜏)")
+        else:
+            # Keep showing disabled state
+            MenuIcon.set(self, "🚫")
+            logger.info("UI State: Hotkeys disabled (🚫)")
 
     def run_loop(self):
-        """starts the application's main run loop and background worker thread."""
+        """Starts the application's main run loop and background worker thread.
+        
+        Handles hotkey initialization failures gracefully, providing user feedback
+        and allowing the app to run in a degraded mode without hotkeys if needed.
+        
+        In nohup/background mode, avoids showing user dialogs that would block execution.
+        """
+        # Check if running in background/nohup mode
+        # Multiple methods to detect background mode for robustness
+        is_background_mode = False
+        
+        # Method 1: Explicit environment variable
+        if os.environ.get("NOHUP_MODE", "0").lower() in ("1", "true", "yes", "on"):
+            is_background_mode = True
+            logger.info("Background mode detected via NOHUP_MODE environment variable")
+        
+        # Method 2: Check if stdout is redirected (common with nohup)
+        try:
+            if not os.isatty(sys.stdout.fileno()):
+                is_background_mode = True
+                logger.info("Background mode detected: stdout is not a TTY")
+        except (AttributeError, OSError):
+            # If we can't check isatty (could be redirected)
+            pass
+            
+        # Method 3: Check parent process name (often 'nohup')
+        try:
+            import psutil
+            try:
+                parent = psutil.Process(os.getppid())
+                if parent.name() in ('nohup', 'daemondo', 'launchd'):
+                    is_background_mode = True
+                    logger.info(f"Background mode detected: parent process is {parent.name()}")
+            except Exception as e:
+                logger.warning(f"Could not check parent process: {e}")
+        except ImportError:
+            # psutil not available
+            logger.info("psutil not available, skipping parent process check")
+            pass
+        
+        logger.info(f"Running in {'background' if is_background_mode else 'interactive'} mode")
+        
+        # Initialize hotkeys with proper error handling
         logger.info("Starting hotkey listener...")
-        hotkeys_start()
+        hotkeys_success = hotkeys_start()
+        
+        # Update UI based on hotkey initialization result
+        if hotkeys_success:
+            logger.info("Hotkeys initialized successfully")
+            self.hotkeys_enabled = True
+            self.menu["Status: Initializing..."].title = "Status: Hotkeys Enabled"
+            self.menu["Enable Hotkeys"].state = True
+        else:
+            logger.error("Failed to initialize hotkeys. App will run without keyboard shortcuts.")
+            self.hotkeys_enabled = False
+            self.menu["Status: Initializing..."].title = "Status: Hotkeys Disabled"
+            self.menu["Enable Hotkeys"].state = False
+            
+            # Show visual indication of disabled hotkeys
+            MenuIcon.set(self, "🚫")
+            
+            # In background mode, don't show dialogs that would block execution
+            if not is_background_mode:
+                # Only show alert dialog when not in background mode
+                try:
+                    rumps.alert(
+                        title="Hotkey Initialization Failed",
+                        message=(
+                            "Vista Scribe could not initialize keyboard shortcuts due to missing permissions.\n\n"
+                            "The app will continue to run, but keyboard shortcuts (Ctrl hold, ⇧⌘/, and double-Option) "
+                            "will not work until permissions are granted.\n\n"
+                            "To enable hotkeys, click 'Open System Accessibility Settings...' in the menu, "
+                            "add this application to the allowed apps list, and then use 'Enable Hotkeys' from the menu."
+                        ),
+                        ok="OK"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to show alert dialog: {e}")
+            else:
+                logger.info("Running in background mode - skipping alert dialogs")
+                
+        # Release event tap resources if hotkeys failed to initialize
+        if not hotkeys_success:
+            logger.info("Event tap stopped and resources released.")
 
+        # Start the async thread for background processing
         logger.info("Starting asyncio worker thread...")
         self.async_thread = threading.Thread(target=self._run_async_loop, daemon=True)
         self.async_thread.start()
 
-        logger.info("Starting queue polling timer...")
-        self.queue_timer.start()
+        # Only start queue polling if hotkeys are enabled
+        if self.hotkeys_enabled:
+            logger.info("Starting queue polling timer...")
+            self.queue_timer.start()
+        else:
+            logger.info("Skipping queue polling timer (hotkeys disabled)")
 
+        # Start the rumps application
         logger.info("Starting rumps application run loop...")
         super().run()  # blocks until quit
         logger.info("Rumps run loop finished.")

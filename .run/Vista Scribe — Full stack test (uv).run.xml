@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Vista Scribe — Full stack test (uv)" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="uv run python full_stack_test.py assets/test_files/dialog_full_mia_CKD_final.mp3 --lang pl" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+    <envs>
+      <env name="FORMAT_ENABLED" value="1" />
+      <env name="WHISPER_VARIANT" value="large-v3-turbo" />
+    </envs>
+    <method v="2" />
+  </configuration>
+</component>

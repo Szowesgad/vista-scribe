@@ -1,4 +1,4 @@
-usage: mlx_whisper [-h] [--model MODEL] [--output-name OUTPUT_NAME]
+3usage: mlx_whisper [-h] [--model MODEL] [--output-name OUTPUT_NAME]
                    [--output-dir OUTPUT_DIR]
                    [--output-format {txt,vtt,srt,tsv,json,all}]
                    [--verbose VERBOSE] [--task {transcribe,translate}]
@@ -114,3 +114,7 @@ options:
                         timestamps (in seconds) of clips to process, where the
                         last end timestamp defaults to the end of the file
                         (default: 0)
+
+uv run mlx_whisper --task transcribe /Users/maciejgad/hosted/Vistas/vista-scribe/user-messages/przepis-co-dalej-z-vista-scribe-musisz-przetranskrybowac-junie.m4a --model /Users/maciejgad/hosted/Vistas/vista-scribe/models/whisper-large-v3-turbo --output-dir /Users/maciejgad/hosted/Vistas/vista-scribe/outputs --output-format all --language pl
+
+uv run mlx_whisper --task transcribe /Users/maciejgad/hosted/Vistas/vista-scribe/user-messages/przepis-co-dalej-z-vista-scribe-musisz-przetranskrybowac-junie.m4a --model /Users/maciejgad/hosted/Vistas/vista-scribe/models/whisper-large-v3-turbo

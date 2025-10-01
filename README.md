@@ -4,7 +4,11 @@ Local, private speech-to-text for macOS. vista-scribe runs in the menu bar, reco
 
 For a full project overview, see docs/PROJECT_DESCRIPTION.md.
 
-## Features
+## Błyskawiczny start (macOS, lokalnie, bez kluczy)
+
+Najprostsza droga bez grzebania w konfiguracji — 3 kroki:
+
+1) Zainstaluj uv (jeśli nie masz):
 
 -   **Menu Bar Interface:** Runs discreetly in the macOS menu bar.
 -   **Hotkey Activation:**
@@ -366,19 +370,19 @@ Notes:
 
 ## Tray icon (menu bar)
 
-You can use a custom tray icon image instead of the default text glyphs.
+Domyślnie aplikacja używa ikony z repo: assets/icon.png (bez żadnych exportów). Możesz opcjonalnie wskazać własny plik PNG/ICNS przez TRAY_ICON.
 
-- Set the TRAY_ICON environment variable to a PNG/ICNS file path.
-- Example (uses your shared Vista icon):
+- Domyślna ścieżka: assets/icon.png
+- Opcjonalna zmiana:
 
 ```bash
-export TRAY_ICON="/Users/maciejgad/hosted/Vistas/vista-develop/src-tauri/icons/icon.png"
+export TRAY_ICON="/path/to/your/icon.png"
 uv run python main.py
 ```
 
-Notes:
-- On some macOS setups we normalize "/Users" to "/users" automatically when such a path exists.
-- When a tray image is present, vista-scribe hides the text title to avoid overlay next to the icon.
+Uwagi:
+- Na macOS normalizujemy "/Users" do "/users" jeśli taka ścieżka istnieje.
+- Gdy ikona jest ustawiona, vista-scribe ukrywa tekstowy tytuł obok ikony w pasku menu.
 
 ## Ruff lint & format
 
@@ -410,3 +414,46 @@ run locally with `uv run pytest -q`.
 ## Acknowledgements
 
 Initially based on [whisprflow-clone](https://github.com/AlexHagemeister/whisprflow-clone.git)
+
+
+---
+
+## FAQ: Jak ustawiać zmienne środowiskowe (zsh/bash)
+
+Jeśli wpiszesz tylko same przypisania:
+
+```
+FORMAT_ENABLED=1 WHISPER_VARIANT=large-v3-turbo
+```
+
+…to nic się nie wydarzy (to nie jest komenda). Użyj jednej z dwóch poprawnych form:
+
+- Eksport + potem komenda (ustawia na bieżącą sesję shell):
+
+```
+export FORMAT_ENABLED=1 WHISPER_VARIANT=large-v3-turbo
+uv run python backend.py
+```
+
+- Jednolinijkowo, tylko dla tej jednej komendy:
+
+```
+FORMAT_ENABLED=1 WHISPER_VARIANT=large-v3-turbo uv run python backend.py
+```
+
+Analogicznie dla aplikacji w trayu:
+
+```
+FORMAT_ENABLED=1 WHISPER_VARIANT=large-v3-turbo uv run python main.py
+```
+
+Wskazówka: jeśli używasz lokalnego LLM, możesz dodać:
+
+```
+LLM_ID=./models/bielik-4.5b-mxfp4-mlx FORMAT_ENABLED=1 uv run python backend.py
+```
+
+Domyślne ścieżki w repo:
+- Ikona: assets/icon.png
+- Modele: ./models (Whisper: ./models/whisper-large-v3-turbo)
+

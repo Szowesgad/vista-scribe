@@ -40,19 +40,9 @@ _llm_id = None
 
 
 def _choose_default_llm_path() -> str:
-    """Pick a sensible default model path present in this repo."""
+    """Return the default local LLM path (Bielik‑4.5B) inside this repo."""
     repo_root = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
-        os.path.join(repo_root, "models", "bielik-1.5b-mxfp4-mlx"),
-        os.path.join(repo_root, "bielik-1.5b-mxfp4-mlx"),  # if stored at root
-        os.path.join(repo_root, "models", "bielik-4.5b-mxfp4-mlx"),
-        os.path.join(repo_root, "bielik-4.5b-mxfp4-mlx"),
-    ]
-    for c in candidates:
-        if os.path.isdir(c):
-            return c
-    # Fallback to a known HF MLX repo (download-on-first-use)
-    return "mlx-community/Llama-3.2-3B-Instruct-4bit"
+    return os.path.join(repo_root, "models", "bielik-4.5b-mxfp4-mlx")
 
 
 def _init_local_model():
@@ -61,6 +51,10 @@ def _init_local_model():
         return
     raw_llm_id = os.environ.get("LLM_ID", _choose_default_llm_path())
     llm_id = normalize_model_path(raw_llm_id)
+    # If llm_id looks like a local path and does not exist, raise early to allow passthrough
+    if not (llm_id.startswith("http") or ":" in llm_id):
+        if not os.path.isdir(llm_id):
+            raise FileNotFoundError(f"Local LLM model directory not found: {llm_id}")
     _model, _tok = load_lm(llm_id)
     _llm_id = llm_id
     logging.info(f"MLX-LM model loaded: {llm_id}")
@@ -164,4 +158,5 @@ async def format_text(raw_text: str) -> str | None:
         return txt or None
     except Exception as e:
         logging.error(f"Local formatting error: {e}", exc_info=True)
-        return None
+        # Passthrough on error
+        return raw_text

@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Vista Scribe — Tests (uv)" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="uv run pytest -q" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+    <envs>
+      <env name="PYTEST_ADDOPTS" value="-q" />
+    </envs>
+    <method v="2" />
+  </configuration>
+</component>
