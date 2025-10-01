@@ -31,7 +31,7 @@ logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(),
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 FORMAT_BACKEND = os.environ.get("FORMAT_BACKEND", "local").lower()
-FORMAT_ENABLED = os.environ.get("FORMAT_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+FORMAT_ENABLED = os.environ.get("FORMAT_ENABLED", "0").strip().lower() not in {"0", "false", "no", "off"}
 
 # --- model load (local) ---
 _model = None
@@ -40,9 +40,18 @@ _llm_id = None
 
 
 def _choose_default_llm_path() -> str:
-    """Return the default local LLM path (Bielik‑4.5B) inside this repo."""
+    """Pick the best available local LLM path, preferring 11B > 4.5B > 1.5B."""
     repo_root = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(repo_root, "models", "bielik-4.5b-mxfp4-mlx")
+    candidates = [
+        os.path.join(repo_root, "models", "bielik-11b-mxfp4-mlx"),
+        os.path.join(repo_root, "models", "bielik-4.5b-mxfp4-mlx"),
+        os.path.join(repo_root, "models", "bielik-1.5b-mxfp4-mlx"),
+    ]
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+    # Fallback to the highest-quality expected path
+    return candidates[0]
 
 
 def _init_local_model():

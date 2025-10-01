@@ -36,7 +36,8 @@ import queue  # for checking standard queue
 # import our modules
 from hotkeys import start as hotkeys_start, stop as hotkeys_stop, is_active as hotkeys_active, events as hk_events
 from audio import Recorder
-from stt import transcribe
+from stt import transcribe, set_language, get_language
+import llm  # runtime toggle for formatting
 from llm import format_text
 from ui import MenuIcon, paste_text
 
@@ -272,6 +273,12 @@ class VistaScribe(rumps.App):
             "Status: Initializing...",
             None,  # Separator
             "Enable Hotkeys",
+            "Enable Formatting",
+            None,  # Separator
+            "Language: Auto",
+            "Language: Polish (PL)",
+            "Language: English (EN)",
+            None,  # Separator
             "Open System Accessibility Settings...",
             None,  # Separator
             "Quit"
@@ -279,11 +286,22 @@ class VistaScribe(rumps.App):
         
         # Set callbacks
         self.menu["Enable Hotkeys"].set_callback(self._toggle_hotkeys)
+        self.menu["Enable Formatting"].set_callback(self._toggle_formatting)
+        self.menu["Language: Auto"].set_callback(self._set_language_auto)
+        self.menu["Language: Polish (PL)"].set_callback(self._set_language_pl)
+        self.menu["Language: English (EN)"].set_callback(self._set_language_en)
         self.menu["Open System Accessibility Settings..."].set_callback(self._open_accessibility)
         self.menu["Quit"].set_callback(self._quit_app)
         
         # Disable menu items initially until we know hotkeys status
         self.menu["Enable Hotkeys"].state = False
+        # Reflect current formatting toggle
+        self.menu["Enable Formatting"].state = llm.FORMAT_ENABLED
+        # Initialize language menu state
+        current_lang = get_language()
+        self.menu["Language: Auto"].state = current_lang is None
+        self.menu["Language: Polish (PL)"].state = current_lang == "pl"
+        self.menu["Language: English (EN)"].state = current_lang == "en"
         
         self.event_queue = hk_events()  # get the standard queue
         self.async_loop = None
@@ -401,6 +419,44 @@ class VistaScribe(rumps.App):
                     ok="OK"
                 )
     
+    def _toggle_formatting(self, sender):
+        """Toggle LLM formatting on/off at runtime."""
+        try:
+            if llm.FORMAT_ENABLED:
+                llm.FORMAT_ENABLED = False
+                self.menu["Enable Formatting"].state = False
+                logger.info("Formatting disabled")
+            else:
+                llm.FORMAT_ENABLED = True
+                self.menu["Enable Formatting"].state = True
+                logger.info("Formatting enabled")
+        except Exception as e:
+            logger.error(f"Failed to toggle formatting: {e}")
+
+    def _set_language_auto(self, sender):
+        """Set Whisper language to auto-detect."""
+        set_language(None)
+        self.menu["Language: Auto"].state = True
+        self.menu["Language: Polish (PL)"].state = False
+        self.menu["Language: English (EN)"].state = False
+        logger.info("Language set to: auto")
+
+    def _set_language_pl(self, sender):
+        """Force Polish transcription."""
+        set_language("pl")
+        self.menu["Language: Auto"].state = False
+        self.menu["Language: Polish (PL)"].state = True
+        self.menu["Language: English (EN)"].state = False
+        logger.info("Language set to: pl")
+
+    def _set_language_en(self, sender):
+        """Force English transcription."""
+        set_language("en")
+        self.menu["Language: Auto"].state = False
+        self.menu["Language: Polish (PL)"].state = False
+        self.menu["Language: English (EN)"].state = True
+        logger.info("Language set to: en")
+
     def _open_accessibility(self, sender):
         """Open macOS System Settings to the Accessibility pane.
         

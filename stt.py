@@ -58,6 +58,26 @@ except Exception as e:
     logging.error(f"Failed to load MLX Whisper model at '{WHISPER_DIR}': {e}")
     whisper_model = None
 
+# Language preference (None = auto). Read from env on startup if provided.
+LANGUAGE_CODE = (os.environ.get("WHISPER_LANGUAGE") or os.environ.get("LANGUAGE") or "").strip().lower() or None
+
+
+def set_language(code: str | None):
+    """Set preferred language code ('pl', 'en', or None for auto)."""
+    global LANGUAGE_CODE
+    if code:
+        code = code.strip().lower()
+        if code not in ("pl", "en"):
+            logging.warning(f"Unsupported language code '{code}', falling back to auto")
+            code = None
+    LANGUAGE_CODE = code
+    logging.info(f"Whisper language set to: {LANGUAGE_CODE or 'auto'}")
+
+
+def get_language() -> str | None:
+    """Get current preferred language code or None for auto."""
+    return LANGUAGE_CODE
+
 
 async def transcribe(path: str) -> str | None:
     """Transcribe the audio file at the given path using local MLX Whisper.
@@ -98,7 +118,12 @@ async def transcribe(path: str) -> str | None:
 
         # Run in thread pool to avoid blocking if heavy
         loop = asyncio.get_event_loop()
-        func = lambda: whisper.transcribe(whisper_model, samples, sr)
+        # Pass language if explicitly set; otherwise let Whisper auto-detect
+        lang = LANGUAGE_CODE
+        if lang:
+            func = lambda: whisper.transcribe(path, language=lang)
+        else:
+            func = lambda: whisper.transcribe(path)
         result = await loop.run_in_executor(None, func)
         text = (result.get("text") or "").strip()
         logging.info(f"Transcription successful. Length: {len(text)} chars.")
